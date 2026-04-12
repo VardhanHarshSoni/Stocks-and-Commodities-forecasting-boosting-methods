@@ -95,7 +95,7 @@ def main():
     print("=" * 80)
     print()
     
-    history_windows = ["2y", "5y", "10y"]
+    history_windows = ["1y", "2y", "3y", "4y", "5y"]
     results = []
     
     total = len(ASSETS) * len(history_windows)

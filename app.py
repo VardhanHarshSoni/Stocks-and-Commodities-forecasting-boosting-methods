@@ -354,7 +354,7 @@ def _fig_price_history(close: pd.Series, name: str, currency_symbol: str) -> go.
         plot_bgcolor="#FAF0E6",
         paper_bgcolor="#FFFFF0",
         hovermode="x unified",
-        margin=dict(l=40, r=20, t=50, b=40),
+        margin=dict(l=40, r=60, t=50, b=40),
         height=380,
         xaxis_title="Date",
         yaxis_title=f"Price ({currency_symbol})",
@@ -391,7 +391,7 @@ def _fig_backtest(y_test: pd.Series, y_pred: pd.Series, name: str, currency_symb
         plot_bgcolor="#FAF0E6",
         paper_bgcolor="#FFFFF0",
         hovermode="x unified",
-        margin=dict(l=40, r=20, t=50, b=40),
+        margin=dict(l=40, r=60, t=50, b=40),
         height=380,
         xaxis_title="Date",
         yaxis_title=f"Price ({currency_symbol})",
@@ -440,13 +440,13 @@ def _fig_forecast(
         plot_bgcolor="#FAF0E6",
         paper_bgcolor="#FFFFF0",
         hovermode="x unified",
-        margin=dict(l=40, r=20, t=50, b=40),
+        margin=dict(l=40, r=60, t=50, b=40),
         height=400,
         xaxis_title="Date",
         yaxis_title=f"Price ({currency_symbol})",
-        xaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(139, 69, 19, 0.3)", title_font=dict(color="#654321"), tickfont=dict(color="#654321")),
+        xaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(139, 69, 19, 0.3)", title_font=dict(color="#3D9024"), tickfont=dict(color="#654321")),
         yaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(139, 69, 19, 0.3)", title_font=dict(color="#654321"), tickfont=dict(color="#654321")),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(255, 255, 255, 0.9)", bordercolor="#654321", borderwidth=1),
+        legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(255, 255, 255, 0.9)", bordercolor="#654321", borderwidth=1),
     )
     return fig
 
@@ -471,7 +471,7 @@ def _fig_importance(model, feature_names: list[str]) -> go.Figure:
         template="plotly_white",
         plot_bgcolor="#FAF0E6",
         paper_bgcolor="#FFFFF0",
-        margin=dict(l=120, r=20, t=45, b=40),
+        margin=dict(l=120, r=60, t=45, b=40),
         height=360,
         xaxis_title="Importance",
         yaxis=dict(autorange="reversed"),
@@ -505,7 +505,7 @@ def main():
         ticker = ASSETS[asset]
         asset_name = asset.split(" - ", 1)[1] if " - " in asset else asset
         currency_symbol = get_currency_symbol(asset)
-        period = st.selectbox("History window", ["2y", "5y", "10y"], index=0)
+        period = st.selectbox("History window", ["1y", "2y", "3y", "4y", "5y"], index=0)
         forecast_days = st.slider("Forecast horizon (trading days)", 5, 15, DEFAULT_FORECAST_DAYS)
         refresh = st.checkbox("Refresh data", value=False)
         st.markdown(
