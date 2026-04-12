@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+from src.features import build_feature_matrix
+
 
 class EnsembleModel:
     """
@@ -157,6 +159,8 @@ def train_and_backtest(close: pd.Series, test_size_frac: float = TEST_SIZE_FRAC)
     """
     print("Training ensemble: GBR, LightGBM, CatBoost, XGBoost...")
     
+    X, y = build_feature_matrix(close)
+    
     # Train individual models in parallel (conceptually)
     gbr_result = train_gbr(close, test_size_frac)
     lightgbm_result = train_lightgbm(close, test_size_frac)
@@ -201,6 +205,7 @@ def train_and_backtest(close: pd.Series, test_size_frac: float = TEST_SIZE_FRAC)
     
     # Use feature names from first model (all should be same)
     feature_names = gbr_result.feature_names
+    feats = feature_names
     
     # Extract the actual model objects from TrainForecastResult
     model_objects = {
@@ -212,6 +217,13 @@ def train_and_backtest(close: pd.Series, test_size_frac: float = TEST_SIZE_FRAC)
     
     # Create ensemble model
     ensemble_model = EnsembleModel(model_objects, weights, feature_names)
+    
+    # Predict on full data for visualization
+    full_pred = ensemble_model.predict(X[feats])
+    y_pred_full = pd.Series(full_pred, index=y.index)
+    
+    # Update backtest with full predictions for visualization
+    backtest.y_pred = y_pred_full
     
     return TrainForecastResult(
         model=ensemble_model,

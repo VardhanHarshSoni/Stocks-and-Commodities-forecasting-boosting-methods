@@ -248,6 +248,9 @@ st.markdown(
 )
 
 
+
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_data(ticker: str, period: str, interval: str, use_cache: bool):
     return load_commodity_history(ticker, period=period, interval=interval, use_cache=use_cache)
@@ -365,28 +368,28 @@ def _fig_price_history(close: pd.Series, name: str, currency_symbol: str) -> go.
     return fig
 
 
-def _fig_backtest(y_test: pd.Series, y_pred: pd.Series, name: str, currency_symbol: str) -> go.Figure:
+def _fig_backtest(actual: pd.Series, predicted: pd.Series, name: str, currency_symbol: str) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=y_test.index,
-            y=y_test.values,
+            x=actual.index,
+            y=actual.values,
             mode="lines",
             name="Actual",
-            line=dict(color="#8B4513", width=1.5),
+            line=dict(color="#8B4513", width=2),
         )
     )
     fig.add_trace(
         go.Scatter(
-            x=y_pred.index,
-            y=y_pred.values,
+            x=predicted.index,
+            y=predicted.values,
             mode="lines",
-            name="Predicted (test)",
-            line=dict(color="#FFA07A", width=1.5),
+            name="Predicted",
+            line=dict(color="#FFA07A", width=2),
         )
     )
     fig.update_layout(
-        title=dict(text=f"{name} — holdout backtest (one-step ahead)", font=dict(size=16, color="#654321", family="Georgia, serif")),
+        title=dict(text=f"{name} — backtest actual vs predicted", font=dict(size=16, color="#654321", family="Georgia, serif")),
         template="plotly_white",
         plot_bgcolor="#FAF0E6",
         paper_bgcolor="#FFFFF0",
@@ -467,7 +470,7 @@ def _fig_importance(model, feature_names: list[str]) -> go.Figure:
         )
     )
     fig.update_layout(
-        title=dict(text="Top feature importances (gradient boosting)", font=dict(size=14, color="#654321", family="Georgia, serif")),
+        title=dict(text="Top feature importances (ensemble method)", font=dict(size=14, color="#654321", family="Georgia, serif")),
         template="plotly_white",
         plot_bgcolor="#FAF0E6",
         paper_bgcolor="#FFFFF0",
@@ -505,7 +508,7 @@ def main():
         ticker = ASSETS[asset]
         asset_name = asset.split(" - ", 1)[1] if " - " in asset else asset
         currency_symbol = get_currency_symbol(asset)
-        period = st.selectbox("History window", ["1y", "2y", "3y", "4y", "5y"], index=0)
+        period = st.selectbox("History window", ["2y", "3y", "4y"], index=0)
         forecast_days = st.slider("Forecast horizon (trading days)", 5, 15, DEFAULT_FORECAST_DAYS)
         refresh = st.checkbox("Refresh data", value=False)
         st.markdown(
@@ -550,6 +553,14 @@ def main():
     news_headlines = _fetch_news(ticker)
     sentiment_score, sentiment_label = _score_headlines_sentiment(news_headlines)
 
+    # Compute additional metrics for report
+    returns_pct = close.pct_change().dropna()
+    var_95 = returns_pct.quantile(0.05)
+    cvar_95 = returns_pct[returns_pct <= var_95].mean()
+    max_dd = ((close.cummax() - close) / close.cummax()).max()
+    sharpe = (returns_pct.mean() / returns_pct.std()) * np.sqrt(252) if returns_pct.std() > 0 else 0
+    signal_text, signal_note = _compose_trade_signal(forecast_change_pct, sentiment_score, forecast_vol)
+
     tab_a, tab_b, tab_c, tab_d, tab_e, tab_f, tab_g, tab_h = st.tabs(
         [
             "Overview & forecast",
@@ -586,7 +597,7 @@ def main():
         m1.metric("MAE (holdout)", f"{bt.mae:,.4f}")
         m2.metric("RMSE (holdout)", f"{bt.rmse:,.4f}")
         m3.metric("MAPE (holdout)", f"{bt.mape:.2f}%")
-        st.plotly_chart(_fig_backtest(bt.y_test, bt.y_pred, asset_name, currency_symbol), use_container_width=True)
+        st.plotly_chart(_fig_backtest(fit.history_close, bt.y_pred, asset_name, currency_symbol), use_container_width=True)
         st.markdown(
             '<p style="margin-top:0.25rem; margin-bottom:1rem; color:#3F2F1F; font-size:0.95rem;">Backtest comparison of actual prices versus model predictions on the validation set. Smaller gaps and closer alignment show stronger historical fit.</p>',
             unsafe_allow_html=True,
