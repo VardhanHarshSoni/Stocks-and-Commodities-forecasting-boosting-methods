@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 import datetime
@@ -297,6 +298,22 @@ def get_currency_symbol(asset_key: str) -> str:
     return "$"
 
 
+def _clean_asset_display_name(asset_key: str) -> str:
+    """Create a clean readable asset name for compare labels.
+
+    Removes category prefixes like "Indian:", "American:", "Commodity:" and drops ticker symbols
+    in parentheses such as "(AAPL)".
+    """
+    name = asset_key
+    for prefix in ("Commodity: ", "American: ", "Indian: "):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+    if name.endswith(")") and " (" in name:
+        name = name[: name.rfind(" (")]
+    return name
+
+
 def _score_headlines_sentiment(headlines: list[dict[str, str]]) -> tuple[float, str]:
     positive = ["up", "rise", "gain", "beat", "strong", "bull", "positive", "surge", "jump", "record"]
     negative = ["down", "fall", "loss", "weak", "miss", "sell", "bear", "drop", "cut", "decline"]
@@ -324,6 +341,149 @@ def _score_headlines_sentiment(headlines: list[dict[str, str]]) -> tuple[float, 
     return normalized, label
 
 
+def _headline_sentiment_score(title: str) -> tuple[float, str]:
+    positive = ["up", "rise", "gain", "beat", "strong", "bull", "positive", "surge", "jump", "record"]
+    negative = ["down", "fall", "loss", "weak", "miss", "sell", "bear", "drop", "cut", "decline"]
+    text = title.lower()
+    positive_count = sum(1 for word in positive if word in text)
+    negative_count = sum(1 for word in negative if word in text)
+    score = positive_count - negative_count
+    if score >= 2:
+        label = "Strong Positive"
+    elif score == 1:
+        label = "Positive"
+    elif score == 0:
+        label = "Neutral"
+    elif score == -1:
+        label = "Negative"
+    else:
+        label = "Strong Negative"
+    normalized = max(min(score / 3.0, 1.0), -1.0)
+    return normalized, label
+
+
+def _fig_news_sentiment_overlay(close: pd.Series, headlines: list[dict[str, str]], currency_symbol: str) -> go.Figure:
+    dates = []
+    prices = []
+    sentiment_scores = []
+    sentiment_labels = []
+    colors = []
+
+    for item in headlines:
+        published = item.get("published", "")
+        try:
+            dt = datetime.datetime.fromisoformat(published.replace("Z", "+00:00"))
+            headline_date = pd.Timestamp(dt.date())
+        except Exception:
+            continue
+
+        price = close.asof(headline_date)
+        if pd.isna(price):
+            continue
+
+        score, label = _headline_sentiment_score(item.get("title", ""))
+        color = "#2E8B57" if score > 0 else "#8B4513" if score == 0 else "#B22222"
+
+        dates.append(headline_date)
+        prices.append(price)
+        sentiment_scores.append(score)
+        sentiment_labels.append(f"{item.get('title', '')} ({label})")
+        colors.append(color)
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(
+        go.Scatter(
+            x=close.index,
+            y=close.values,
+            mode="lines",
+            name="Price",
+            line=dict(color="#FF7F50", width=1.8),
+        ),
+        secondary_y=False,
+    )
+
+    if dates:
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=prices,
+                mode="markers",
+                name="News events",
+                marker=dict(color=colors, size=12, symbol="diamond"),
+                hovertext=sentiment_labels,
+                hoverinfo="text",
+            ),
+            secondary_y=False,
+        )
+        fig.add_trace(
+            go.Bar(
+                x=dates,
+                y=sentiment_scores,
+                name="Sentiment score",
+                marker_color=["#2E8B57" if s > 0 else "#8B4513" if s == 0 else "#B22222" for s in sentiment_scores],
+                opacity=0.6,
+            ),
+            secondary_y=True,
+        )
+
+    fig.update_layout(
+        title=dict(text="News & Sentiment Overlay", font=dict(size=16, color="#654321", family="Georgia, serif")),
+        template="plotly_white",
+        plot_bgcolor="#FAF0E6",
+        paper_bgcolor="#FFFFF0",
+        hovermode="x unified",
+        margin=dict(l=40, r=60, t=50, b=40),
+        height=420,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(255, 255, 255, 0.9)", bordercolor="#654321", borderwidth=1),
+    )
+    fig.update_yaxes(title_text=f"Price ({currency_symbol})", secondary_y=False, showgrid=True, gridcolor="rgba(139, 69, 19, 0.3)")
+    fig.update_yaxes(title_text="Sentiment score", secondary_y=True, range=[-1, 1], showgrid=False)
+    return fig
+
+
+def _fig_asset_comparison(
+    primary_close: pd.Series,
+    primary_name: str,
+    compare_close: pd.Series,
+    compare_name: str,
+) -> go.Figure:
+    df = pd.DataFrame({primary_name: primary_close, compare_name: compare_close}).dropna()
+    normalized = df / df.iloc[0] * 100
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=normalized.index,
+            y=normalized[primary_name],
+            mode="lines",
+            name=primary_name,
+            line=dict(color="#FF7F50", width=2),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=normalized.index,
+            y=normalized[compare_name],
+            mode="lines",
+            name=compare_name,
+            line=dict(color="#8B4513", width=2),
+        )
+    )
+    fig.update_layout(
+        title=dict(text=f"{primary_name} vs {compare_name} — normalized comparison", font=dict(size=16, color="#654321", family="Georgia, serif")),
+        template="plotly_white",
+        plot_bgcolor="#FAF0E6",
+        paper_bgcolor="#FFFFF0",
+        hovermode="x unified",
+        margin=dict(l=40, r=60, t=50, b=40),
+        height=420,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(255, 255, 255, 0.9)", bordercolor="#654321", borderwidth=1),
+    )
+    fig.update_xaxes(title_text="Date", showgrid=True, gridcolor="rgba(139, 69, 19, 0.3)")
+    fig.update_yaxes(title_text="Normalized performance (100 = start)", showgrid=True, gridcolor="rgba(139, 69, 19, 0.3)")
+    return fig
+
+
 def _compose_trade_signal(forecast_change_pct: float, sentiment_score: float, forecast_vol: float) -> tuple[str, str]:
     if forecast_change_pct > 1 and sentiment_score > 0.25:
         return "Strong Buy", "Forecast momentum and sentiment are aligned. Consider adding on dips."
@@ -338,6 +498,48 @@ def _compose_trade_signal(forecast_change_pct: float, sentiment_score: float, fo
     if forecast_change_pct > 0:
         return "Watch / Hold", "Forecast is positive but sentiment is muted. Monitor the next data points."
     return "Watch / Hold", "Forecast is negative but sentiment is not strongly bearish. Avoid committing too soon."
+
+
+def _relative_comparison_recommendation(
+    primary_name: str,
+    primary_forecast_pct: float,
+    primary_sentiment_label: str,
+    compare_name: str,
+    compare_forecast_pct: float,
+    compare_sentiment_label: str,
+) -> tuple[str, str]:
+    if not np.isfinite(primary_forecast_pct) and not np.isfinite(compare_forecast_pct):
+        return (
+            "Comparison unavailable",
+            "Both asset forecasts are unavailable. Review the market data and retry later.",
+        )
+
+    def sentiment_value(label: str) -> float:
+        return {
+            "Strong Positive": 1.0,
+            "Positive": 0.5,
+            "Neutral": 0.0,
+            "Negative": -0.5,
+            "Strong Negative": -1.0,
+        }.get(label, 0.0)
+
+    primary_score = (primary_forecast_pct if np.isfinite(primary_forecast_pct) else 0.0) + sentiment_value(primary_sentiment_label) * 1.2
+    compare_score = (compare_forecast_pct if np.isfinite(compare_forecast_pct) else 0.0) + sentiment_value(compare_sentiment_label) * 1.2
+
+    if primary_score > compare_score + 0.8:
+        return (
+            f"{primary_name} appears stronger for near-term opportunity",
+            f"{primary_name} has a more favorable forecast move and sentiment profile than {compare_name}. Consider this asset first if you are looking for a higher momentum candidate.",
+        )
+    if compare_score > primary_score + 0.8:
+        return (
+            f"{compare_name} appears stronger for near-term opportunity",
+            f"{compare_name} has a more favorable forecast move and sentiment profile than {primary_name}. It may offer a better risk/reward profile over the selected window.",
+        )
+    return (
+        "Assets are closely matched",
+        f"Both {primary_name} and {compare_name} show similar forecast potential and sentiment. Use risk tolerance and portfolio balance to decide between them.",
+    )
 
 
 def _fig_price_history(close: pd.Series, name: str, currency_symbol: str) -> go.Figure:
@@ -508,6 +710,8 @@ def main():
         ticker = ASSETS[asset]
         asset_name = asset.split(" - ", 1)[1] if " - " in asset else asset
         currency_symbol = get_currency_symbol(asset)
+        asset_display_name = _clean_asset_display_name(asset)
+
         period = st.selectbox("History window", ["2y", "3y", "4y"], index=0)
         forecast_days = st.slider("Forecast horizon (trading days)", 5, 15, DEFAULT_FORECAST_DAYS)
         refresh = st.checkbox("Refresh data", value=False)
@@ -561,16 +765,17 @@ def main():
     sharpe = (returns_pct.mean() / returns_pct.std()) * np.sqrt(252) if returns_pct.std() > 0 else 0
     signal_text, signal_note = _compose_trade_signal(forecast_change_pct, sentiment_score, forecast_vol)
 
-    tab_a, tab_b, tab_c, tab_d, tab_e, tab_f, tab_g, tab_h = st.tabs(
+    tab_a, tab_b, tab_c, tab_d, tab_e, tab_f, tab_g, tab_h, tab_i = st.tabs(
         [
             "Overview & forecast",
             "Backtest",
             "Insights",
             "Statistics",
-            "News",
+            "News & Sentiment",
             "Trading Signals",
             "Technical Analysis",
             "Risk Metrics",
+            "Compare assets",
         ]
     )
 
@@ -741,18 +946,16 @@ def main():
         )
 
     with tab_e:
-        st.subheader("News")
-        
+        st.subheader("News & Sentiment")
+
         st.markdown(
             f"""
-            <div style="background: linear-gradient(135deg, #FFF8F0 0%, #F5E6D3 100%); color: #3B1B43; padding: 1.2rem; border-radius: 18px; margin-bottom:1rem; border: 2px solid #8B4513; font-family: 'Georgia', serif; box-shadow: 0 16px 34px rgba(175, 93, 150, 0.1);">
-                <h4 style="margin-top:0; color:#7C2F70;">📰 News Sentiment Analysis</h4>
-                <p style="margin:0.4rem 0 0.7rem 0; color:#5F2F67;">We analyze recent news headlines to determine the overall market sentiment. This helps identify whether the news coverage is generally positive (bullish), neutral, or negative (bearish) for this asset.</p>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <span style="font-size: 2rem; font-weight: bold; color:#3C1D3F;">{sentiment_score:+.2f}</span>
-                        <span style="font-size: 1rem; color:#5F2F67; margin-left: 0.5rem;">({sentiment_label})</span>
-                    </div>
+            <div style="background: linear-gradient(135deg, #FFF8F0 0%, #F5E6D3 100%); color: #3B1B43; padding: 1.4rem; border-radius: 18px; margin: 1rem 0; border: 2px solid #8B4513; font-family: 'Georgia', serif; box-shadow: 0 16px 34px rgba(175, 93, 150, 0.1);">
+                <h4 style="margin-top:0; color:#7C2F70;">📰 News Sentiment Summary</h4>
+                <p style="margin:0.4rem 0 0.8rem 0; color:#5F2F67; font-size:1rem;">We aggregate recent headlines and show how market news aligns with the current price action.</p>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                    <div style="font-size:1.2rem; font-weight:700; color:#3C1D3F;">Overall sentiment: <span style='color:#572E74;'>{sentiment_label}</span></div>
+                    <div style="font-size:1.35rem; font-weight:800; color:#3C1D3F;">Headline score: <span style='color:#572E74;'>{sentiment_score:+.2f}</span></div>
                 </div>
             </div>
             """,
@@ -760,16 +963,176 @@ def main():
         )
 
         if news_headlines:
-            for headline in news_headlines[:6]:
+            for headline in news_headlines[:8]:
+                sentiment_value, sentiment_label_item = _headline_sentiment_score(headline.get("title", ""))
+                color = "#2E8B57" if sentiment_value > 0 else "#8B4513" if sentiment_value == 0 else "#B22222"
                 st.markdown(
-                    f"<div style='background: linear-gradient(135deg, #FFF8F0 0%, #F8E3D8 100%); border:3px solid #D99A6B; padding:0.72rem 0.9rem; border-radius:14px; margin-bottom:0.75rem; font-family: Poppins, sans-serif;'>"
+                    f"<div style='background: linear-gradient(135deg, #FFF8F0 0%, #F8E3D8 100%); border:3px solid {color}; padding:0.72rem 0.9rem; border-radius:14px; margin-bottom:0.75rem; font-family: Poppins, sans-serif;'>"
                     f"<a href='{headline['link']}' target='_blank' style='text-decoration: none; color:#4F1D3A; font-size:1.18rem; font-weight:700; line-height:1.2;'><strong>{headline['title']}</strong></a><br>"
-                    f"<span style='color:#7A4B2E; font-size:0.95rem; letter-spacing:0.01em;'>{headline['provider']} — {headline['published']}</span>"
+                    f"<span style='color:#7A4B2E; font-size:0.95rem; letter-spacing:0.01em;'>{headline['provider']} — {headline['published']}</span><br>"
+                    f"<span style='display:inline-block;margin-top:0.4rem;padding:0.35rem 0.7rem;background:{color};color:white;border-radius:999px;font-size:0.9rem;'>Sentiment: {sentiment_label_item}</span>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
         else:
             st.warning("No recent headlines found for this asset. Try a different ticker or wait for new market updates.")
+
+    with tab_i:
+        st.subheader("Compare assets")
+        st.markdown(
+            "Choose a second asset here to compare price moves, forecast strength, sentiment bias, and buy/sell signals. "
+            "The primary asset remains selected above in the parameters panel."
+        )
+        compare_name_map = {
+            _clean_asset_display_name(key): key
+            for key in asset_keys
+            if key != asset
+        }
+        compare_options = ["Select second asset"] + list(compare_name_map.keys())
+        compare_label = st.selectbox("Second asset", compare_options, index=0, key="compare_asset_select")
+
+        if compare_label == "Select second asset":
+            st.info("Choose a second asset in this tab to compare price, news sentiment, model signal, and risk metrics.")
+        else:
+            compare_asset_key = compare_name_map.get(compare_label, compare_label)
+            compare_ticker = ASSETS.get(compare_asset_key)
+            compare_asset_name = _clean_asset_display_name(compare_asset_key)
+            compare_currency_symbol = get_currency_symbol(compare_asset_key)
+            asset_display_name = _clean_asset_display_name(asset)
+
+            try:
+                compare_df = _load_data(compare_ticker, period, DEFAULT_INTERVAL, use_cache=not refresh)
+                compare_close = compare_df["close"].astype(float)
+            except Exception as e:
+                st.error(f"Failed to load comparison asset data: {e}")
+                compare_close = None
+
+            if compare_close is not None:
+                comp_df = pd.DataFrame({asset_display_name: close, compare_asset_name: compare_close}).dropna()
+                corr = comp_df.pct_change().corr().iloc[0, 1]
+                primary_return = close.iloc[-1] / close.iloc[0] - 1
+                compare_return = compare_close.iloc[-1] / compare_close.iloc[0] - 1
+                primary_vol = close.pct_change().std() * np.sqrt(252)
+                compare_vol = compare_close.pct_change().std() * np.sqrt(252)
+                primary_sharpe = (close.pct_change().mean() / close.pct_change().std()) * np.sqrt(252) if close.pct_change().std() > 0 else 0
+                compare_sharpe = (compare_close.pct_change().mean() / compare_close.pct_change().std()) * np.sqrt(252) if compare_close.pct_change().std() > 0 else 0
+                volatility_ratio = primary_vol / compare_vol if compare_vol != 0 else float("nan")
+
+                compare_headlines = _fetch_news(compare_ticker)
+                compare_sentiment_score, compare_sentiment_label = _score_headlines_sentiment(compare_headlines)
+
+                try:
+                    compare_fit = train_and_backtest(compare_close)
+                    compare_fc = attach_forecast(compare_fit, horizon_days=forecast_days)
+                    compare_forecast_change = compare_fc.forecast_close[-1] - compare_close.iloc[-1]
+                    compare_forecast_change_pct = (compare_forecast_change / compare_close.iloc[-1]) * 100
+                    compare_signal_text, compare_signal_note = _compose_trade_signal(
+                        compare_forecast_change_pct,
+                        compare_sentiment_score,
+                        np.std(compare_fc.forecast_close),
+                    )
+                except Exception as e:
+                    compare_fc = None
+                    compare_forecast_change_pct = float("nan")
+                    compare_signal_text = "Model unavailable"
+                    compare_signal_note = f"Comparison model failed: {e}"
+
+                primary_signal_text, primary_signal_note = _compose_trade_signal(
+                    forecast_change_pct,
+                    sentiment_score,
+                    forecast_vol,
+                )
+                recommendation_title, recommendation_note = _relative_comparison_recommendation(
+                    asset_display_name,
+                    forecast_change_pct,
+                    sentiment_label,
+                    compare_asset_name,
+                    compare_forecast_change_pct,
+                    compare_sentiment_label,
+                )
+
+                st.plotly_chart(
+                    _fig_asset_comparison(close, asset_display_name, compare_close, compare_asset_name),
+                    use_container_width=True,
+                )
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric(f"{asset_display_name} total return", f"{primary_return * 100:+.2f}%")
+                m2.metric(f"{compare_asset_name} total return", f"{compare_return * 100:+.2f}%")
+                m3.metric("Correlation", f"{corr:.2f}")
+
+                m4, m5, m6, m7 = st.columns(4)
+                m4.metric(f"{asset_display_name} forecast move", f"{forecast_change_pct:+.2f}%")
+                m5.metric(f"{compare_asset_name} forecast move", f"{compare_forecast_change_pct:+.2f}%")
+                m6.metric(f"{asset_display_name} signal", primary_signal_text)
+                m7.metric(f"{compare_asset_name} signal", compare_signal_text)
+
+                m8, m9, m10, m11 = st.columns(4)
+                m8.metric(f"{asset_display_name} Sharpe", f"{primary_sharpe:.2f}")
+                m9.metric(f"{compare_asset_name} Sharpe", f"{compare_sharpe:.2f}")
+                m10.metric(f"{asset_display_name} sentiment", f"{sentiment_label}")
+                m11.metric(f"{compare_asset_name} sentiment", f"{compare_sentiment_label}")
+
+                st.markdown(
+                    f"<div style='background: linear-gradient(135deg, #FFF8F0 0%, #F5E6D3 100%); padding:1rem; border-radius:16px; border:1px solid #D7C2A2; margin-top:1rem;'>"
+                    f"<h4 style='margin:0 0 0.4rem 0; color:#5F3A72;'>{recommendation_title}</h4>"
+                    f"<p style='margin:0; color:#4B2E2A;'>{recommendation_note}</p>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f"<p style='margin-top:0.8rem; color:#3F2F1F; font-size:0.95rem;'>Comparison uses {len(comp_df):,} common trading days. Prices are normalized to a starting value of 100 for both assets to show relative performance.</p>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    "<div style='background: linear-gradient(135deg, #F0F8FF 0%, #F4F1FF 100%); color:#2F286A; padding:1rem; border-radius:16px; border:1px solid #C7C0E8; margin-top:1rem;'>"
+                    "<h4 style='margin:0 0 0.6rem 0;'>Comparison highlights</h4>"
+                    "<ul style='margin:0; padding-left:1.1rem; line-height:1.6;'>"
+                    f"<li><strong>{asset_display_name} forecast move</strong>: {forecast_change_pct:+.2f}% over the next {forecast_days} trading days.</li>"
+                    f"<li><strong>{compare_asset_name} forecast move</strong>: {compare_forecast_change_pct:+.2f}% over the next {forecast_days} trading days.</li>"
+                    f"<li><strong>{asset_display_name} signal</strong>: {primary_signal_text}.</li>"
+                    f"<li><strong>{compare_asset_name} signal</strong>: {compare_signal_text}.</li>"
+                    "</ul>"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown(f"<h4 style='color:#5F3A72;'>{asset_display_name} news & sentiment</h4>", unsafe_allow_html=True)
+                    if news_headlines:
+                        for headline in news_headlines[:4]:
+                            sentiment_value, sentiment_label_item = _headline_sentiment_score(headline.get("title", ""))
+                            color = "#2E8B57" if sentiment_value > 0 else "#8B4513" if sentiment_value == 0 else "#B22222"
+                            st.markdown(
+                                f"<div style='background: linear-gradient(135deg, #FFF8F0 0%, #F8E3D8 100%); border:3px solid {color}; padding:0.7rem 0.9rem; border-radius:12px; margin-bottom:0.7rem; font-family: Poppins, sans-serif;'>"
+                                f"<strong>{headline['title']}</strong><br>"
+                                f"<span style='color:#7A4B2E; font-size:0.92rem;'>{headline['provider']} — {headline['published']}</span><br>"
+                                f"<span style='display:inline-block;margin-top:0.35rem;padding:0.3rem 0.55rem;background:{color};color:white;border-radius:999px;font-size:0.85rem;'>Sentiment: {sentiment_label_item}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+                    else:
+                        st.write("No recent headlines found for this asset.")
+                with col2:
+                    st.markdown(f"<h4 style='color:#5F3A72;'>{compare_asset_name} news & sentiment</h4>", unsafe_allow_html=True)
+                    if compare_headlines:
+                        for headline in compare_headlines[:4]:
+                            sentiment_value, sentiment_label_item = _headline_sentiment_score(headline.get("title", ""))
+                            color = "#2E8B57" if sentiment_value > 0 else "#8B4513" if sentiment_value == 0 else "#B22222"
+                            st.markdown(
+                                f"<div style='background: linear-gradient(135deg, #FFF8F0 0%, #F8E3D8 100%); border:3px solid {color}; padding:0.7rem 0.9rem; border-radius:12px; margin-bottom:0.7rem; font-family: Poppins, sans-serif;'>"
+                                f"<strong>{headline['title']}</strong><br>"
+                                f"<span style='color:#7A4B2E; font-size:0.92rem;'>{headline['provider']} — {headline['published']}</span><br>"
+                                f"<span style='display:inline-block;margin-top:0.35rem;padding:0.3rem 0.55rem;background:{color};color:white;border-radius:999px;font-size:0.85rem;'>Sentiment: {sentiment_label_item}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+                    else:
+                        st.write("No recent headlines found for this comparison asset.")
+
 
     with tab_f:
         st.subheader("Trading Signals")
