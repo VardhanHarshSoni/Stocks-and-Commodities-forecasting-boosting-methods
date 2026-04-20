@@ -13,13 +13,17 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import io
+from datetime import datetime, timezone, timedelta
+import pytz
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
-import datetime
+import datetime as dt
 
 from config import (
     ASSETS,
@@ -102,6 +106,11 @@ st.markdown(
         border-radius: 12px !important;
         padding: 1rem !important;
         color: #4A2E1A !important;
+    }
+    
+    /* Reduce font size for metric values */
+    div[data-testid="stMetric"] div:last-child {
+        font-size: 0.85rem !important;
     }
     
     /* Card styling */
@@ -272,8 +281,8 @@ def _fetch_news(ticker: str) -> list[dict[str, str]]:
             if pub_date:
                 try:
                     # Parse ISO format date
-                    dt = datetime.datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
-                    published = dt.strftime("%Y-%m-%d %H:%M")
+                    date_obj = dt.datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
+                    published = date_obj.strftime("%Y-%m-%d %H:%M")
                 except:
                     published = pub_date
             canonical_url = content.get("canonicalUrl", {}).get("url", "")
@@ -296,6 +305,162 @@ def get_currency_symbol(asset_key: str) -> str:
     if "Indian:" in asset_key:
         return "₹"
     return "$"
+
+
+def _is_market_holiday(date: pd.Timestamp) -> bool:
+    """Check if a date is a US market holiday."""
+    # US Market holidays (simplified list for common holidays)
+    us_holidays = {
+        (1, 1),    # New Year's Day
+        (1, 20),   # MLK Day (3rd Monday of January) - approximate
+        (2, 17),   # Presidents' Day (3rd Monday of February) - approximate
+        (3, 17),   # Good Friday (varies) - approximate
+        (5, 26),   # Memorial Day (last Monday of May) - approximate
+        (7, 4),    # Independence Day
+        (9, 1),    # Labor Day (1st Monday of September) - approximate
+        (11, 28),  # Thanksgiving (4th Thursday of November) - approximate
+        (12, 25),  # Christmas
+    }
+    return (date.month, date.day) in us_holidays or date.weekday() >= 5  # 5=Saturday, 6=Sunday
+
+
+def _get_closing_price_with_timestamp(df: pd.DataFrame, asset_key: str) -> tuple[float, str, bool, str]:
+    """Get the previous trading day's closing price with timestamp and timezone, and check if market was closed.
+    
+    Returns:
+        Tuple of (price, formatted_timestamp_with_tz, is_holiday_or_weekend, holiday_message)
+    """
+    try:
+        # Determine timezone based on asset type
+        if "Indian:" in asset_key:
+            market_tz = pytz.timezone('Asia/Kolkata')
+            tz_label = "IST"
+        else:
+            market_tz = pytz.timezone('US/Eastern')
+            tz_label = "EDT"
+        
+        # Get the PREVIOUS trading day (index -2, since -1 is the last available)
+        if len(df) >= 2:
+            prev_date = df.index[-2]
+            price = df["close"].iloc[-2]
+        else:
+            # If only 1 day, get that day
+            prev_date = df.index[-1]
+            price = df["close"].iloc[-1]
+        
+        # Localize the date to market timezone with market close time
+        # Set close time: IST 15:30 (3:30 PM), EDT 16:00 (4:00 PM)
+        close_hour = 15 if "Indian:" in asset_key else 16
+        close_minute = 30 if "Indian:" in asset_key else 0
+        
+        # Create datetime with market close time
+        prev_datetime = prev_date.replace(hour=close_hour, minute=close_minute, second=0)
+        
+        if df.index.tz is None:
+            prev_date_tz = market_tz.localize(prev_datetime)
+        else:
+            prev_date_tz = pd.Timestamp(prev_datetime).tz_localize(None).tz_localize(market_tz)
+        
+        formatted_timestamp = prev_date_tz.strftime("%Y-%m-%d %H:%M:%S %Z")
+        
+        # Check if it's a holiday or weekend
+        today_aware = datetime.now(tz=pytz.UTC).astimezone(market_tz)
+        today_ts = pd.Timestamp(today_aware.date())
+        is_today_holiday = _is_market_holiday(today_ts)
+        is_yesterday_holiday = _is_market_holiday(prev_date)
+        
+        holiday_message = ""
+        if is_today_holiday:
+            holiday_message = "Today is a market holiday"
+        elif is_yesterday_holiday:
+            holiday_message = "Yesterday was a market holiday"
+        elif prev_date.weekday() >= 5:
+            holiday_message = "Last trading day was a weekend"
+        
+        return float(price), formatted_timestamp, (is_today_holiday or is_yesterday_holiday), holiday_message
+    except Exception as e:
+        print(f"Error getting closing price: {e}")
+        return float(df["close"].iloc[-1]), "N/A", False, ""
+
+
+def _generate_backtest_report() -> tuple[io.BytesIO, str]:
+    """Generate comprehensive backtest report for all assets across all history windows.
+    
+    Returns:
+        Tuple of (BytesIO object with Excel file, filename string)
+    """
+    def _mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        """Calculate Mean Absolute Percentage Error."""
+        y_true = np.asarray(y_true, dtype=float)
+        y_pred = np.asarray(y_pred, dtype=float)
+        denom = np.maximum(np.abs(y_true), 1e-8)
+        return float(np.mean(np.abs((y_true - y_pred) / denom)) * 100)
+    
+    def get_approx_return(close: pd.Series) -> float:
+        """Calculate approximate 1-year return (252 trading days)."""
+        if len(close) < 252:
+            daily_return = close.pct_change().mean()
+            return float(daily_return * 252 * 100) if np.isfinite(daily_return) else 0.0
+        else:
+            return float((close.iloc[-1] / close.iloc[-252] - 1) * 100)
+    
+    history_windows = ["2y", "3y", "4y"]
+    results = []
+    
+    for asset_display, ticker in sorted(ASSETS.items()):
+        for window in history_windows:
+            try:
+                df = load_commodity_history(ticker, period=window, interval=DEFAULT_INTERVAL, use_cache=True)
+                close = df["close"].astype(float)
+                
+                if len(close) < 30:
+                    continue
+                
+                n_obs = len(close)
+                approx_return = get_approx_return(close)
+                
+                fit = train_and_backtest(close)
+                bt = fit.backtest
+                
+                result = {
+                    "Asset": asset_display,
+                    "History Window": window,
+                    "Observations": n_obs,
+                    "Approx 1Y Return (%)": round(approx_return, 2),
+                    "MAE": round(bt.mae, 4),
+                    "RMSE": round(bt.rmse, 4),
+                    "MAPE (%)": round(bt.mape, 2),
+                }
+                results.append(result)
+            except Exception:
+                continue
+    
+    # Create DataFrame
+    df_results = pd.DataFrame(results)
+    df_results = df_results.sort_values(by=["Asset", "History Window"]).reset_index(drop=True)
+    
+    # Export to Excel
+    output_buffer = io.BytesIO()
+    with pd.ExcelWriter(output_buffer, engine="openpyxl") as writer:
+        df_results.to_excel(writer, sheet_name="Results", index=False)
+        worksheet = writer.sheets["Results"]
+        
+        # Auto-adjust column widths
+        for column in worksheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+    output_buffer.seek(0)
+    filename = f"backtest_report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return output_buffer, filename
 
 
 def _clean_asset_display_name(asset_key: str) -> str:
@@ -372,8 +537,8 @@ def _fig_news_sentiment_overlay(close: pd.Series, headlines: list[dict[str, str]
     for item in headlines:
         published = item.get("published", "")
         try:
-            dt = datetime.datetime.fromisoformat(published.replace("Z", "+00:00"))
-            headline_date = pd.Timestamp(dt.date())
+            date_obj = dt.datetime.fromisoformat(published.replace("Z", "+00:00"))
+            headline_date = pd.Timestamp(date_obj.date())
         except Exception:
             continue
 
@@ -714,7 +879,14 @@ def main():
 
         period = st.selectbox("History window", ["2y", "3y", "4y"], index=0)
         forecast_days = st.slider("Forecast horizon (trading days)", 5, 15, DEFAULT_FORECAST_DAYS)
-        refresh = st.checkbox("Refresh data", value=False)
+        
+        # Refresh button with round arrow icon
+        col_refresh1, col_refresh2 = st.columns([1, 4])
+        with col_refresh1:
+            refresh = st.button("🔄", help="Refresh data", key="refresh_btn")
+        with col_refresh2:
+            st.markdown("<p style='margin: 0.5rem 0; color: #5B3C2B;'>Refresh data</p>", unsafe_allow_html=True)
+        
         st.markdown(
             "**Note:** Forecasts are for demonstration only—not investment advice. "
             "Prices are driven by market dynamics, macro events, and risk premiums; "
@@ -728,14 +900,23 @@ def main():
         st.stop()
 
     close = df["close"].astype(float)
-    last_update = close.index.max().strftime("%Y-%m-%d")
+    
+    # Get closing price with timestamp and timezone (pass asset key, not ticker)
+    closing_price, timestamp_str, is_holiday, holiday_msg = _get_closing_price_with_timestamp(df, asset)
+    
+    # Display metrics
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric("Latest Closing Price", f"{currency_symbol}{close.iloc[-1]:,.2f}")
+        price_display = f"{currency_symbol}{closing_price:,.2f}"
+        if is_holiday and holiday_msg:
+            st.metric("Previous Close Price", price_display)
+            st.warning(f"🔴 {holiday_msg}", icon="⚠️")
+        else:
+            st.metric("Previous Close Price", price_display)
     with c2:
         st.metric("Samples Observed", f"{len(close):,}")
     with c3:
-        st.metric("Last Day Observed", last_update)
+        st.metric("Last Observed Day", timestamp_str)
     with c4:
         ret_1y = close.pct_change(252).iloc[-1] if len(close) > 252 else float("nan")
         st.metric("Estimated 1yr Return", f"{ret_1y * 100:.1f}%" if np.isfinite(ret_1y) else "—")
@@ -780,6 +961,29 @@ def main():
     )
 
     with tab_a:
+        # Add Report button at the top
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 3])
+        with col_btn1:
+            generate_report_btn = st.button("📊 Report of all Stocks", key="generate_report_btn", use_container_width=True)
+        
+        if generate_report_btn:
+            with st.spinner("Generating backtest report for all stocks..."):
+                try:
+                    report_buffer, filename = _generate_backtest_report()
+                    st.download_button(
+                        label="📥 Download Report",
+                        data=report_buffer.getvalue(),
+                        file_name=filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="download_report_btn",
+                        use_container_width=True
+                    )
+                    st.success("Report generated successfully!")
+                except Exception as e:
+                    st.error(f"Failed to generate report: {e}")
+        
+        st.markdown("---")
+        
         col_left, col_center, col_right = st.columns((0.15, 0.7, 0.15))
         with col_center:
             st.plotly_chart(
@@ -1390,36 +1594,7 @@ def main():
         )
         st.plotly_chart(fig_dd, use_container_width=True)
         st.markdown(
-            '<p style="margin-top:0.25rem; margin-bottom:1rem; color:#3F2F1F; font-size:0.95rem;">Drawdown chart showing how far the asset has fallen from its highest historical close. Useful for assessing downside risk and the depth of past sell-offs.</p>',
-            unsafe_allow_html=True,
-        )
-        
-        st.markdown("---")
-        st.subheader("Returns Distribution")
-        fig_ret = go.Figure()
-        fig_ret.add_trace(
-            go.Histogram(
-                x=returns.values * 100,
-                nbinsx=50,
-                name="Return",
-                marker_color="#FFA07A",
-                opacity=0.7,
-            )
-        )
-        fig_ret.update_layout(
-            title=dict(text=f"{asset_name} — Daily Returns Distribution", font=dict(color="#654321", family="Georgia, serif")),
-            xaxis_title="Return (%)",
-            yaxis_title="Frequency",
-            template="plotly_white",
-            plot_bgcolor="#FAF0E6",
-            paper_bgcolor="#FFFFF0",
-            xaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(139, 69, 19, 0.3)", title_font=dict(color="#654321"), tickfont=dict(color="#654321")),
-            yaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(139, 69, 19, 0.3)", title_font=dict(color="#654321"), tickfont=dict(color="#654321")),
-            height=400,
-        )
-        st.plotly_chart(fig_ret, use_container_width=True)
-        st.markdown(
-            '<p style="margin-top:0.25rem; margin-bottom:1rem; color:#3F2F1F; font-size:0.95rem;">Histogram of daily returns showing the distribution of gains and losses. Use it to understand return volatility, skew, and the frequency of extreme moves.</p>',
+            '<p style="margin-top:0.25rem; margin-bottom:1rem; color:#3F2F1F; font-size:0.95rem;">Drawdown tracks the percentage decline from the peak price. Deeper and longer drawdowns indicate higher drawdown risk. This helps identify periods of maximum loss from peak values.</p>',
             unsafe_allow_html=True,
         )
 
