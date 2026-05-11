@@ -850,6 +850,274 @@ def _fig_importance(model, feature_names: list[str]) -> go.Figure:
     return fig
 
 
+def _fig_models_backtest_comparison(fit, actual: pd.Series, currency_symbol: str, name: str) -> go.Figure:
+    """Compare backtest predictions from all 4 models vs actual prices."""
+    fig = go.Figure()
+    
+    # Add actual prices
+    fig.add_trace(
+        go.Scatter(
+            x=actual.index,
+            y=actual.values,
+            mode="lines",
+            name="Actual",
+            line=dict(color="#000000", width=3),
+            opacity=0.8,
+        )
+    )
+    
+    # Colors for each model
+    model_colors = {
+        "gbr": "#FF6B6B",
+        "lightgbm": "#4ECDC4",
+        "catboost": "#FFE66D",
+        "xgb": "#95E1D3",
+    }
+    
+    # Add predictions from individual models
+    individual_models = fit.individual_models
+    for model_name in ["gbr", "lightgbm", "catboost", "xgb"]:
+        if model_name in individual_models:
+            model_result = individual_models[model_name]
+            bt = model_result.backtest
+            fig.add_trace(
+                go.Scatter(
+                    x=bt.y_pred.index,
+                    y=bt.y_pred.values,
+                    mode="lines",
+                    name=model_name.upper(),
+                    line=dict(color=model_colors.get(model_name, "#808080"), width=1.8),
+                    opacity=0.7,
+                )
+            )
+    
+    # Add ensemble prediction
+    ensemble_bt = fit.backtest
+    fig.add_trace(
+        go.Scatter(
+            x=ensemble_bt.y_pred.index,
+            y=ensemble_bt.y_pred.values,
+            mode="lines",
+            name="Ensemble",
+            line=dict(color="#FF7F50", width=2.5, dash="dash"),
+        )
+    )
+    
+    fig.update_layout(
+        title=dict(text=f"{name} — Model Backtest Comparison (Actual vs Predicted)", font=dict(size=16, color="#654321", family="Georgia, serif")),
+        template="plotly_white",
+        plot_bgcolor="#FAF0E6",
+        paper_bgcolor="#FFFFF0",
+        hovermode="x unified",
+        margin=dict(l=40, r=60, t=50, b=40),
+        height=450,
+        xaxis_title="Date",
+        yaxis_title=f"Price ({currency_symbol})",
+        xaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(139, 69, 19, 0.3)", title_font=dict(color="#654321"), tickfont=dict(color="#654321")),
+        yaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(139, 69, 19, 0.3)", title_font=dict(color="#654321"), tickfont=dict(color="#654321")),
+        legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=0.02, bgcolor="rgba(255, 255, 255, 0.95)", bordercolor="#654321", borderwidth=1),
+    )
+    return fig
+
+
+def _fig_models_forecast_comparison(fit, currency_symbol: str, name: str) -> go.Figure:
+    """Compare forecast predictions from all 4 models."""
+    fig = go.Figure()
+    
+    # Add history
+    fig.add_trace(
+        go.Scatter(
+            x=fit.history_close.index,
+            y=fit.history_close.values,
+            mode="lines",
+            name="History",
+            line=dict(color="#654321", width=2),
+        )
+    )
+    
+    # Colors for each model
+    model_colors = {
+        "gbr": "#FF6B6B",
+        "lightgbm": "#4ECDC4",
+        "catboost": "#FFE66D",
+        "xgb": "#95E1D3",
+    }
+    
+    # Add forecasts from individual models
+    individual_models = fit.individual_models
+    for model_name in ["gbr", "lightgbm", "catboost", "xgb"]:
+        if model_name in individual_models:
+            model_result = individual_models[model_name]
+            if len(model_result.forecast_close) > 0:
+                fig.add_trace(
+                    go.Scatter(
+                        x=model_result.forecast_index,
+                        y=model_result.forecast_close,
+                        mode="lines+markers",
+                        name=f"{model_name.upper()} Forecast",
+                        line=dict(color=model_colors.get(model_name, "#808080"), width=2),
+                        marker=dict(size=6),
+                    )
+                )
+    
+    # Add ensemble forecast
+    if len(fit.forecast_close) > 0:
+        fig.add_trace(
+            go.Scatter(
+                x=fit.forecast_index,
+                y=fit.forecast_close,
+                mode="lines+markers",
+                name="Ensemble Forecast",
+                line=dict(color="#FF7F50", width=3, dash="dash"),
+                marker=dict(size=8, symbol="star"),
+            )
+        )
+    
+    # Add vertical line at last history point
+    if len(fit.history_close) > 0:
+        fig.add_vline(
+            x=fit.history_close.index[-1],
+            line_width=1,
+            line_dash="dot",
+            line_color="#8B4513",
+        )
+    
+    fig.update_layout(
+        title=dict(text=f"{name} — Model Forecast Comparison", font=dict(size=16, color="#654321", family="Georgia, serif")),
+        template="plotly_white",
+        plot_bgcolor="#FAF0E6",
+        paper_bgcolor="#FFFFF0",
+        hovermode="x unified",
+        margin=dict(l=40, r=60, t=50, b=40),
+        height=450,
+        xaxis_title="Date",
+        yaxis_title=f"Price ({currency_symbol})",
+        xaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(139, 69, 19, 0.3)", title_font=dict(color="#654321"), tickfont=dict(color="#654321")),
+        yaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(139, 69, 19, 0.3)", title_font=dict(color="#654321"), tickfont=dict(color="#654321")),
+        legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=0.02, bgcolor="rgba(255, 255, 255, 0.95)", bordercolor="#654321", borderwidth=1),
+    )
+    return fig
+
+
+def _fig_models_performance_metrics(fit) -> go.Figure:
+    """Create a bar chart comparing performance metrics of all models."""
+    models = ["gbr", "lightgbm", "catboost", "xgb", "ensemble"]
+    mae_values = []
+    rmse_values = []
+    mape_values = []
+    
+    # Get metrics for individual models
+    individual_models = fit.individual_models
+    for model_name in ["gbr", "lightgbm", "catboost", "xgb"]:
+        if model_name in individual_models:
+            bt = individual_models[model_name].backtest
+            mae_values.append(bt.mae)
+            rmse_values.append(bt.rmse)
+            mape_values.append(bt.mape)
+    
+    # Get ensemble metrics
+    ensemble_bt = fit.backtest
+    mae_values.append(ensemble_bt.mae)
+    rmse_values.append(ensemble_bt.rmse)
+    mape_values.append(ensemble_bt.mape)
+    
+    # Create subplots
+    fig = make_subplots(
+        rows=1, cols=3,
+        subplot_titles=("MAE", "RMSE", "MAPE (%)"),
+        horizontal_spacing=0.12,
+    )
+    
+    # Colors for models
+    colors = ["#FF6B6B", "#4ECDC4", "#FFE66D", "#95E1D3", "#FF7F50"]
+    
+    # Add MAE
+    fig.add_trace(
+        go.Bar(x=models, y=mae_values, name="MAE", marker_color=colors, showlegend=False),
+        row=1, col=1
+    )
+    
+    # Add RMSE
+    fig.add_trace(
+        go.Bar(x=models, y=rmse_values, name="RMSE", marker_color=colors, showlegend=False),
+        row=1, col=2
+    )
+    
+    # Add MAPE
+    fig.add_trace(
+        go.Bar(x=models, y=mape_values, name="MAPE", marker_color=colors, showlegend=False),
+        row=1, col=3
+    )
+    
+    fig.update_yaxes(title_text="MAE", row=1, col=1)
+    fig.update_yaxes(title_text="RMSE", row=1, col=2)
+    fig.update_yaxes(title_text="MAPE (%)", row=1, col=3)
+    
+    fig.update_layout(
+        title=dict(text="Model Performance Metrics Comparison", font=dict(size=16, color="#654321", family="Georgia, serif")),
+        template="plotly_white",
+        plot_bgcolor="#FAF0E6",
+        paper_bgcolor="#FFFFF0",
+        height=400,
+        showlegend=False,
+    )
+    
+    return fig
+
+
+def _get_report_file_path() -> Path:
+    """Get the path where the comprehensive backtest report should be stored."""
+    report_dir = ROOT / "data"
+    report_dir.mkdir(exist_ok=True)
+    return report_dir / "backtest_report_cache.xlsx"
+
+
+def _report_exists_and_fresh(max_age_hours: int = 24) -> bool:
+    """Check if a cached report exists and is fresh (not older than max_age_hours).
+    
+    Args:
+        max_age_hours: Maximum age of the report in hours (default: 24)
+    
+    Returns:
+        True if report exists and is fresh, False otherwise
+    """
+    report_path = _get_report_file_path()
+    if not report_path.exists():
+        return False
+    
+    file_age_seconds = (datetime.now(tz=timezone.utc) - datetime.fromtimestamp(report_path.stat().st_mtime, tz=timezone.utc)).total_seconds()
+    file_age_hours = file_age_seconds / 3600
+    
+    return file_age_hours < max_age_hours
+
+
+def _get_or_generate_report(force_regenerate: bool = False) -> tuple[io.BytesIO, str]:
+    """Get existing report or generate a new one if needed.
+    
+    Args:
+        force_regenerate: If True, always generate a new report
+    
+    Returns:
+        Tuple of (BytesIO object with Excel file, filename string)
+    """
+    report_path = _get_report_file_path()
+    
+    # Use cached report if it exists and is fresh, unless force_regenerate is True
+    if not force_regenerate and report_path.exists() and _report_exists_and_fresh():
+        # Read from cache
+        output_buffer = io.BytesIO(report_path.read_bytes())
+        return output_buffer, report_path.name
+    
+    # Generate new report
+    output_buffer, _ = _generate_backtest_report()
+    
+    # Save to cache
+    report_path.write_bytes(output_buffer.getvalue())
+    output_buffer.seek(0)
+    
+    return output_buffer, report_path.name
+
+
 def main():
     st.markdown(
         '<div class="title-wrapper"><h1 class="main-header"><span>STOCKS & COMMODITIES</span><strong>PRICE FORECASTING ENGINE</strong></h1></div>',
@@ -877,7 +1145,7 @@ def main():
         currency_symbol = get_currency_symbol(asset)
         asset_display_name = _clean_asset_display_name(asset)
 
-        period = st.selectbox("History window", ["2y", "3y", "4y"], index=0)
+        period = "2y"
         forecast_days = st.slider("Forecast horizon (trading days)", 5, 15, DEFAULT_FORECAST_DAYS)
         
         # Refresh button with round arrow icon
@@ -887,11 +1155,73 @@ def main():
         with col_refresh2:
             st.markdown("<p style='margin: 0.5rem 0; color: #5B3C2B;'>Refresh data</p>", unsafe_allow_html=True)
         
-        st.markdown(
-            "**Note:** Forecasts are for demonstration only—not investment advice. "
-            "Prices are driven by market dynamics, macro events, and risk premiums; "
-            "any model will drift out-of-sample."
+        # Report button with smart caching
+        st.markdown("---")
+        st.subheader("📊 Comprehensive Report")
+        
+        report_buffer, report_filename = _get_or_generate_report()
+        
+        # Check if report is from cache
+        report_path = _get_report_file_path()
+        is_cached = report_path.exists() and _report_exists_and_fresh()
+        
+        if is_cached:
+            cache_info = " (cached - generated today)"
+        else:
+            cache_info = " (freshly generated)"
+        
+        st.download_button(
+            label=f"📥 Download Report{cache_info}",
+            data=report_buffer,
+            file_name=f"backtest_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Download comprehensive backtest report for all stocks and commodities",
+            key="report_download_btn",
         )
+        
+        st.markdown(
+            """
+            <p style='font-size: 0.85rem; color: #7D664D; margin-top: 0.75rem;'>
+            The report includes backtest metrics (MAE, RMSE, MAPE) and performance data for all assets.
+            If generated today, the cached version is downloaded. Otherwise, a fresh report is generated.
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
+        
+        st.markdown(
+            """
+            **IMPORTANT DISCLAIMER & SEBI COMPLIANCE NOTICE:**
+            
+            This platform is for **informational and educational purposes only**. The forecasts, analyses, 
+            and information provided here **do NOT constitute financial advice, investment recommendations, 
+            or a solicitation to buy or sell any financial instrument**.
+            
+            **Regulatory Notice (SEBI Compliance):**
+            - This platform is **not authorized or regulated by SEBI** (Securities and Exchange Board of India).
+            - **No SEBI investor protections apply** to this platform or its services.
+            - The predictions and models herein are **not approved by SEBI** and carry significant risk.
+            - Past performance is **not indicative of future results**.
+            - All market forecasts are subject to model drift and market anomalies.
+            
+            **Risk Disclosure:**
+            - **Capital at risk**: All investments in stocks, commodities, and derivatives carry substantial risk of loss.
+            - The accuracy of price forecasts is **not guaranteed** and may be significantly inaccurate.
+            - Market volatility, geopolitical events, and systemic shocks can render predictions obsolete.
+            - Leverage and derivatives amplify both gains and losses.
+            
+            **Your Responsibilities:**
+            - **Always consult a qualified SEBI-registered financial advisor** before making any investment decisions.
+            - Conduct your own due diligence and validate all information independently.
+            - Never invest capital you cannot afford to lose.
+            - Ensure compliance with applicable tax and regulatory obligations.
+            
+            **Limitation of Liability:**
+            The creators of this platform assume **no responsibility** for any financial losses, incorrect forecasts, 
+            or damages arising from the use of this information. Use at your own risk and discretion.
+            """
+        )
+
 
     try:
         df = _load_data(ticker, period, DEFAULT_INTERVAL, use_cache=not refresh)
@@ -905,7 +1235,7 @@ def main():
     closing_price, timestamp_str, is_holiday, holiday_msg = _get_closing_price_with_timestamp(df, asset)
     
     # Display metrics
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     with c1:
         price_display = f"{currency_symbol}{closing_price:,.2f}"
         if is_holiday and holiday_msg:
@@ -914,10 +1244,8 @@ def main():
         else:
             st.metric("Previous Close Price", price_display)
     with c2:
-        st.metric("Samples Observed", f"{len(close):,}")
-    with c3:
         st.metric("Last Observed Day", timestamp_str)
-    with c4:
+    with c3:
         ret_1y = close.pct_change(252).iloc[-1] if len(close) > 252 else float("nan")
         st.metric("Estimated 1yr Return", f"{ret_1y * 100:.1f}%" if np.isfinite(ret_1y) else "—")
 
@@ -946,7 +1274,7 @@ def main():
     sharpe = (returns_pct.mean() / returns_pct.std()) * np.sqrt(252) if returns_pct.std() > 0 else 0
     signal_text, signal_note = _compose_trade_signal(forecast_change_pct, sentiment_score, forecast_vol)
 
-    tab_a, tab_b, tab_c, tab_d, tab_e, tab_f, tab_g, tab_h, tab_i = st.tabs(
+    tab_a, tab_b, tab_c, tab_d, tab_e, tab_f, tab_g, tab_h, tab_i, tab_j = st.tabs(
         [
             "Overview & forecast",
             "Backtest",
@@ -957,31 +1285,11 @@ def main():
             "Technical Analysis",
             "Risk Metrics",
             "Compare assets",
+            "Model Comparison",
         ]
     )
 
     with tab_a:
-        # Add Report button at the top
-        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 3])
-        with col_btn1:
-            generate_report_btn = st.button("📊 Report of all Stocks", key="generate_report_btn", use_container_width=True)
-        
-        if generate_report_btn:
-            with st.spinner("Generating backtest report for all stocks..."):
-                try:
-                    report_buffer, filename = _generate_backtest_report()
-                    st.download_button(
-                        label="📥 Download Report",
-                        data=report_buffer.getvalue(),
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="download_report_btn",
-                        use_container_width=True
-                    )
-                    st.success("Report generated successfully!")
-                except Exception as e:
-                    st.error(f"Failed to generate report: {e}")
-        
         st.markdown("---")
         
         col_left, col_center, col_right = st.columns((0.15, 0.7, 0.15))
@@ -994,6 +1302,15 @@ def main():
                 '<p style="margin-top:0.25rem; margin-bottom:1rem; color:#3F2F1F; font-size:0.95rem;">Historical closing prices with the model&apos;s multi-day forecast shown beyond the latest observed value. Use this chart to compare recent price behavior against the projected trend.</p>',
                 unsafe_allow_html=True,
             )
+            
+            # Forecast table
+            st.subheader("Forecasted Prices")
+            forecast_df = pd.DataFrame({
+                "Date": fc.forecast_index.strftime("%Y-%m-%d"),
+                "Forecasted Price": [f"{currency_symbol}{price:,.2f}" for price in fc.forecast_close],
+            })
+            st.dataframe(forecast_df, use_container_width=True)
+            
             st.plotly_chart(_fig_importance(fc.model, fc.feature_names), use_container_width=True)
             st.markdown(
                 '<p style="margin-top:0.25rem; margin-bottom:1rem; color:#3F2F1F; font-size:0.95rem;">Feature importance ranks the variables driving the forecast. Taller bars indicate features that had stronger influence on model predictions.</p>',
@@ -1595,6 +1912,64 @@ def main():
         st.plotly_chart(fig_dd, use_container_width=True)
         st.markdown(
             '<p style="margin-top:0.25rem; margin-bottom:1rem; color:#3F2F1F; font-size:0.95rem;">Drawdown tracks the percentage decline from the peak price. Deeper and longer drawdowns indicate higher drawdown risk. This helps identify periods of maximum loss from peak values.</p>',
+            unsafe_allow_html=True,
+        )
+
+    with tab_j:
+        st.subheader("Model Comparison")
+        st.markdown(
+            "This section compares the performance of all four boosting models: **XGBoost**, **LightGBM**, **Gradient Boosting Regressor (GBR)**, and **CatBoost**. "
+            "The ensemble method combines predictions from all four using inverse-MAE weighting to produce the final forecast."
+        )
+        
+        st.markdown("---")
+        st.markdown("### Performance Metrics Comparison")
+        st.markdown(
+            "This comparison shows three key performance metrics for each model:\n"
+            "- **MAE**: Mean Absolute Error (lower is better)\n"
+            "- **RMSE**: Root Mean Squared Error (lower is better)\n"
+            "- **MAPE**: Mean Absolute Percentage Error (lower is better)"
+        )
+        st.plotly_chart(
+            _fig_models_performance_metrics(fit),
+            use_container_width=True,
+        )
+        
+        st.markdown("---")
+        st.markdown("### Model Weights & Metrics")
+        
+        # Create a detailed metrics table
+        metrics_data = []
+        for model_name in ["gbr", "lightgbm", "catboost", "xgb"]:
+            if model_name in fit.individual_models:
+                model_result = fit.individual_models[model_name]
+                bt = model_result.backtest
+                metrics_data.append({
+                    "Model": model_name.upper(),
+                    "Weight": f"{fit.weights[model_name]:.4f}",
+                    "MAE": f"{bt.mae:.6f}",
+                    "RMSE": f"{bt.rmse:.6f}",
+                    "MAPE (%)": f"{bt.mape:.2f}",
+                })
+        
+        # Add ensemble metrics
+        ensemble_bt = fit.backtest
+        metrics_data.append({
+            "Model": "ENSEMBLE",
+            "Weight": "—",
+            "MAE": f"{ensemble_bt.mae:.6f}",
+            "RMSE": f"{ensemble_bt.rmse:.6f}",
+            "MAPE (%)": f"{ensemble_bt.mape:.2f}",
+        })
+        
+        metrics_df = pd.DataFrame(metrics_data)
+        st.dataframe(metrics_df, use_container_width=True)
+        
+        st.markdown(
+            "<p style='margin-top:1rem; color:#3F2F1F; font-size:0.95rem;'>"
+            "<strong>Note on weights:</strong> Models are weighted inversely to their MAE (Mean Absolute Error) from the backtest period. "
+            "A model with lower error gets a higher weight in the ensemble. This ensures more accurate models contribute more to the final prediction."
+            "</p>",
             unsafe_allow_html=True,
         )
 

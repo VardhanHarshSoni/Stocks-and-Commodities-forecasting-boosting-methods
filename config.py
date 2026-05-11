@@ -11,29 +11,48 @@ DATA_DIR = ROOT / "data" / "cache"
 # Yahoo Finance symbols for front-month futures (liquid, widely used proxies)
 COMMODITIES = {
     "WTI Crude Oil": "CL=F",
+    "Brent Crude Oil": "BZ=F",
     "Natural Gas": "NG=F",
     "Copper": "HG=F",
+    "Gold": "GC=F",
+    "Silver": "SI=F",
+    "Platinum": "PL=F",
+    "Palladium": "PA=F",
     "Coffee": "KC=F",
     "Sugar": "SB=F",
+    "Wheat": "ZWH=F",
+    "Corn": "ZCH=F",
+    "Soybeans": "ZSH=F",
 }
 
-# Top 20 NASDAQ stocks by market cap
+# Top NASDAQ stocks by market cap and liquidity
 NASDAQ_STOCKS = {
     "Apple (AAPL)": "AAPL",
     "Microsoft (MSFT)": "MSFT",
     "Amazon (AMZN)": "AMZN",
     "Tesla (TSLA)": "TSLA",
     "Meta (META)": "META",
+    "Nvidia (NVDA)": "NVDA",
+    "Alphabet/Google (GOOGL)": "GOOGL",
+    "Broadcom (AVGO)": "AVGO",
     "Costco (COST)": "COST",
     "Invesco QQQ (QQQ)": "QQQ",
     "Netflix (NFLX)": "NFLX",
     "AMD (AMD)": "AMD",
+    "Qualcomm (QCOM)": "QCOM",
     "PepsiCo (PEP)": "PEP",
     "Walmart (WMT)": "WMT",
     "Airbnb (ABNB)": "ABNB",
+    "ASML (ASML)": "ASML",
+    "Adobe (ADBE)": "ADBE",
+    "Salesforce (CRM)": "CRM",
+    "ServiceNow (NOW)": "NOW",
+    "Accenture (ACN)": "ACN",
+    "Cisco (CSCO)": "CSCO",
+    "Intel (INTC)": "INTC",
 }
 
-# All 30 BSE Sensex stocks
+# BSE Sensex and other major Indian stocks
 INDIAN_STOCKS = {
     "Tata Consultancy Services (TCS)": "TCS.NS",
     "Reliance Industries": "RELIANCE.NS",
@@ -58,6 +77,18 @@ INDIAN_STOCKS = {
     "Bajaj Finance": "BAJAJFINSV.NS",
     "Tata Steel": "TATASTEEL.NS",
     "Divi's Laboratories": "DIVISLAB.NS",
+    "Adani Green Energy": "ADANIGREEN.NS",
+    "Adani Ports": "ADANIPORTS.NS",
+    "GAIL (India)": "GAIL.NS",
+    "Indian Oil": "IOC.NS",
+    "BPCL": "BPCL.NS",
+    "Life Insurance Corporation": "LIC.NS",
+    "Bharti Airtel": "BHARTIARTL.NS",
+    "Hindustan Unilever": "HINDUNILVR.NS",
+    "Bajaj Auto": "BAJAJGROUP.NS",
+    "Mahindra & Mahindra": "M&M.NS",
+    "TVS Motor": "TVSMOTOR.NS",
+    "Bosch India": "BOSCHIND.NS",
 }
 
 # Combined assets dictionary
