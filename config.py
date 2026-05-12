@@ -10,19 +10,19 @@ DATA_DIR = ROOT / "data" / "cache"
 
 # Yahoo Finance symbols for front-month futures (liquid, widely used proxies)
 COMMODITIES = {
-    "WTI Crude Oil": "CL=F",
-    "Brent Crude Oil": "BZ=F",
-    "Natural Gas": "NG=F",
-    "Copper": "HG=F",
-    "Gold": "GC=F",
-    "Silver": "SI=F",
-    "Platinum": "PL=F",
-    "Palladium": "PA=F",
-    "Coffee": "KC=F",
-    "Sugar": "SB=F",
-    "Wheat": "ZWH=F",
-    "Corn": "ZCH=F",
-    "Soybeans": "ZSH=F",
+    "WTI Crude Oil (1,000 barrels)": "CL=F",
+    "Brent Crude Oil (1,000 barrels)": "BZ=F",
+    "Natural Gas (10,000 MMBtu)": "NG=F",
+    "Copper (25,000 pounds)": "HG=F",
+    "Gold (100 troy ounces)": "GC=F",
+    "Silver (5,000 troy ounces)": "SI=F",
+    "Platinum (50 troy ounces)": "PL=F",
+    "Palladium (100 troy ounces)": "PA=F",
+    "Coffee (37,500 pounds)": "KC=F",
+    "Sugar (112,000 pounds)": "SB=F",
+    "Wheat (5,000 bushels)": "ZW=F",
+    "Corn (5,000 bushels)": "ZC=F",
+    "Soybeans (5,000 bushels)": "ZS=F",
 }
 
 # Top NASDAQ stocks by market cap and liquidity
@@ -82,13 +82,13 @@ INDIAN_STOCKS = {
     "GAIL (India)": "GAIL.NS",
     "Indian Oil": "IOC.NS",
     "BPCL": "BPCL.NS",
-    "Life Insurance Corporation": "LIC.NS",
+    "Muthoot Finance Ltd": "MUTHOOTFIN.NS",
     "Bharti Airtel": "BHARTIARTL.NS",
     "Hindustan Unilever": "HINDUNILVR.NS",
-    "Bajaj Auto": "BAJAJGROUP.NS",
+    "Eicher Motors Ltd": " EICHERMOT.NS",
     "Mahindra & Mahindra": "M&M.NS",
     "TVS Motor": "TVSMOTOR.NS",
-    "Bosch India": "BOSCHIND.NS",
+    "Mazagon Dock Shipbuilders Ltd": "MAZDOCK.NS",
 }
 
 # Combined assets dictionary
@@ -98,7 +98,7 @@ ASSETS = {
     **{f"Indian: {k}": v for k, v in INDIAN_STOCKS.items()},
 }
 
-DEFAULT_PERIOD = "5y"
+DEFAULT_PERIOD = "2y"
 DEFAULT_INTERVAL = "1d"
 DEFAULT_FORECAST_DAYS = 30
 

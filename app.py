@@ -1155,40 +1155,6 @@ def main():
         with col_refresh2:
             st.markdown("<p style='margin: 0.5rem 0; color: #5B3C2B;'>Refresh data</p>", unsafe_allow_html=True)
         
-        # Report button with smart caching
-        st.markdown("---")
-        st.subheader("📊 Comprehensive Report")
-        
-        report_buffer, report_filename = _get_or_generate_report()
-        
-        # Check if report is from cache
-        report_path = _get_report_file_path()
-        is_cached = report_path.exists() and _report_exists_and_fresh()
-        
-        if is_cached:
-            cache_info = " (cached - generated today)"
-        else:
-            cache_info = " (freshly generated)"
-        
-        st.download_button(
-            label=f"📥 Download Report{cache_info}",
-            data=report_buffer,
-            file_name=f"backtest_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            help="Download comprehensive backtest report for all stocks and commodities",
-            key="report_download_btn",
-        )
-        
-        st.markdown(
-            """
-            <p style='font-size: 0.85rem; color: #7D664D; margin-top: 0.75rem;'>
-            The report includes backtest metrics (MAE, RMSE, MAPE) and performance data for all assets.
-            If generated today, the cached version is downloaded. Otherwise, a fresh report is generated.
-            </p>
-            """,
-            unsafe_allow_html=True,
-        )
-        
         st.markdown(
             """
             **IMPORTANT DISCLAIMER & SEBI COMPLIANCE NOTICE:**
